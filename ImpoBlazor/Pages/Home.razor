@@ -1,0 +1,139 @@
+﻿@page "/"
+@using ImpoLib
+@using System.IO
+@using Microsoft.AspNetCore.Components.Forms
+
+<h3>Configurar Imposição</h3>
+
+<EditForm Model="@settings" OnValidSubmit="HandleValidSubmit">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
+
+    <div class="mb-3">
+        <label for="impositionMethod" class="form-label">Método de Imposição:</label>
+        <InputSelect id="impositionMethod" class="form-select" @bind-Value="settings.ImpositionMethod">
+            <option value="1">Perfect-Bound (Encadernação perfeita)</option>
+            <option value="2">Cut-Stack (Corte e empilhamento)</option>
+        </InputSelect>
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label">Arquivo PDF de Entrada (opcional):</label>
+        <InputFile OnChange="HandleFileSelected" />
+    </div>
+
+    <div class="mb-3">
+        <label for="totalPages" class="form-label">Número de Páginas para Booklet (caso não informe input):</label>
+        <InputNumber id="totalPages" class="form-control" @bind-Value="settings.TotalPages" />
+    </div>
+
+    <div class="mb-3">
+        <label for="outputPath" class="form-label">Nome do Arquivo de Saída:</label>
+        <InputText id="outputPath" class="form-control" @bind-Value="settings.OutputPath" />
+    </div>
+
+    <div class="form-check mb-3">
+        <InputCheckbox id="doubleSided" class="form-check-input" @bind-Value="settings.DoubleSided" />
+        <label for="doubleSided" class="form-check-label">Impressão Frente e Verso?</label>
+    </div>
+
+    <div class="mb-3">
+        <label for="pagesPerSide" class="form-label">Páginas por Lado (2, 4, 6, 8, 9, 16):</label>
+        <InputNumber id="pagesPerSide" class="form-control" @bind-Value="settings.PagesPerSide" />
+    </div>
+
+    <div class="mb-3">
+        <label for="gapBetweenPages" class="form-label">Distância entre Páginas (em mm):</label>
+        <InputNumber id="gapBetweenPages" class="form-control" @bind-Value="gapMm" />
+    </div>
+
+    <button type="submit" class="btn btn-primary">Executar Imposição</button>
+</EditForm>
+
+@if (!string.IsNullOrEmpty(outputPdfUrl))
+{
+    <div class="mt-3">
+        <a href="@outputPdfUrl" download="@settings.OutputPath">Baixar PDF Imputado</a>
+    </div>
+}
+
+@code {
+    // Objeto de configuração (utilize a mesma classe ImpositionSettings já existente)
+    private ImpositionSettings settings = new ImpositionSettings()
+        {
+            OutputPath = "imposto.pdf" // valor padrão para nome do arquivo de saída
+        };
+
+    // Gap informado em mm (será convertido para pontos)
+    private decimal gapMm { get; set; } = 0;
+
+    // Variável para armazenar o arquivo enviado pelo usuário (se houver)
+    private IBrowserFile uploadedFile;
+
+    // URL para download do PDF resultante (utilizando data URL)
+    private string outputPdfUrl;
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        uploadedFile = e.File;
+        // Aqui você pode armazenar o conteúdo do arquivo em um MemoryStream
+
+
+        // Em uma implementação real, você poderá enviar esse stream para o seu método de imposição.
+        // Para este exemplo, definimos o InputPath como nulo para indicar que o PDF será gerado em memória.
+        settings.InputPath = null;
+    }
+
+    private async Task HandleValidSubmit()
+    {
+        settings.GapBetweenPages = (float)((double)gapMm * 2.83465);
+
+        using (var ms = new MemoryStream())
+        {
+
+            if (uploadedFile != null)
+              await uploadedFile.OpenReadStream().CopyToAsync(ms);
+
+            using (var outputStream = new MemoryStream())
+            {
+
+                if (ms.Length > 0)
+                {
+                    ImpositionEngine.RunImposition(settings, ms, outputStream);
+                  
+                }
+                else
+                {
+                    ImpositionEngine.RunImposition(settings, null, outputStream);
+                }
+                // OBS: Na implementação real, adapte o método para aceitar streams de entrada/saída.
+
+                // Após o processamento, convertemos o MemoryStream para um data URL para download.
+                // Aqui, simulamos que outputStream contém o PDF processado.
+                byte[] pdfBytes = outputStream.ToArray();
+                string base64Pdf = Convert.ToBase64String(pdfBytes);
+                outputPdfUrl = $"data:application/pdf;base64,{base64Pdf}";
+            }
+        }
+
+        // Atualiza a interface
+        StateHasChanged();
+    }
+}
+6. Arquivo wwwroot/index.html
+html
+Copiar
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8" />
+    <title>Imposição de Páginas PDF</title>
+    <base href="/" />
+    <link href="css/bootstrap/bootstrap.min.css" rel="stylesheet" />
+    <link href="css/site.css" rel="stylesheet" />
+</head>
+<body>
+    <div id="app">Carregando...</div>
+    <script src="_framework/blazor.webassembly.js"></script>
+</body>
+</html>
