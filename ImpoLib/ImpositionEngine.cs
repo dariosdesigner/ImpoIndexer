@@ -2,14 +2,7 @@
 using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Canvas;
 using iText.Layout;
-using iText.Layout.Element;
 using iText.Layout.Properties;
-using System;
-using System.IO;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace ImpoLib;
 
@@ -44,9 +37,9 @@ public static class ImpositionEngine
                     textCanvas.ShowTextAligned($"Página {i}",
                         page.GetPageSize().GetWidth() / 2,
                         page.GetPageSize().GetHeight() / 2,
-                        
+
                         TextAlignment.CENTER,
-                        VerticalAlignment.MIDDLE,0);
+                        VerticalAlignment.MIDDLE, 0);
                     textCanvas.Close();
                 }
                 doc.Close();
@@ -80,7 +73,7 @@ public static class ImpositionEngine
         // Calcula dimensões de saída com base no layout escolhido
         LayoutCalculator.CalculateOutputDimensions(settings.PagesPerSide, originalWidth, originalHeight,
             settings.GapBetweenPages, out float outputWidth, out float outputHeight, out int cols, out int rows);
-        PageSize outputPageSize =new PageSize(outputWidth, outputHeight);
+        PageSize outputPageSize = new PageSize(outputWidth, outputHeight);
 
         // Determina o total de folhas necessárias
         int totalSheets = (int)Math.Ceiling((double)pageCount / pagesPerSheet);

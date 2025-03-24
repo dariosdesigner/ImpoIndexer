@@ -1,139 +1,206 @@
 ﻿@page "/"
 @using ImpoLib
-@using System.IO
 @using Microsoft.AspNetCore.Components.Forms
+@inject IJSRuntime JS
+@using System.Linq
 
-<h3>Configurar Imposição</h3>
+<h3>Imposition Layout Preview</h3>
+<p>Configure os parâmetros para visualizar o layout de imposição:</p>
 
-<EditForm Model="@settings" OnValidSubmit="HandleValidSubmit">
+<EditForm Model="@settings" OnValidSubmit="@UpdatePreview">
     <DataAnnotationsValidator />
     <ValidationSummary />
 
     <div class="mb-3">
-        <label for="impositionMethod" class="form-label">Método de Imposição:</label>
-        <InputSelect id="impositionMethod" class="form-select" @bind-Value="settings.ImpositionMethod">
-            <option value="1">Perfect-Bound (Encadernação perfeita)</option>
-            <option value="2">Cut-Stack (Corte e empilhamento)</option>
+        <label class="form-label">Páginas por Lado (por face):</label>
+        <InputNumber @bind-Value="settings.PagesPerSide" class="form-control" />
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Gap entre Páginas (em pontos):</label>
+        <InputNumber @bind-Value="settings.GapBetweenPages" class="form-control" />
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Largura da Página Original (em pontos):</label>
+        <InputNumber @bind-Value="originalWidth" class="form-control" />
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Altura da Página Original (em pontos):</label>
+        <InputNumber @bind-Value="originalHeight" class="form-control" />
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Total de Páginas:</label>
+        <InputNumber @bind-Value="settings.TotalPages" class="form-control" />
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Método de Imposição:</label>
+        <InputSelect @bind-Value="settings.ImpositionMethod" class="form-select">
+            <option value="1">Perfect-Bound</option>
+            <option value="2">Cut-Stack</option>
         </InputSelect>
     </div>
-
-    <div class="mb-3">
-        <label class="form-label">Arquivo PDF de Entrada (opcional):</label>
-        <InputFile OnChange="HandleFileSelected" />
+    <div class="mb-3 form-check">
+        <InputCheckbox @bind-Value="settings.DoubleSided" class="form-check-input" id="doubleSidedCheck" />
+        <label class="form-check-label" for="doubleSidedCheck">Frente e Verso</label>
     </div>
-
-    <div class="mb-3">
-        <label for="totalPages" class="form-label">Número de Páginas para Booklet (caso não informe input):</label>
-        <InputNumber id="totalPages" class="form-control" @bind-Value="settings.TotalPages" />
-    </div>
-
-    <div class="mb-3">
-        <label for="outputPath" class="form-label">Nome do Arquivo de Saída:</label>
-        <InputText id="outputPath" class="form-control" @bind-Value="settings.OutputPath" />
-    </div>
-
-    <div class="form-check mb-3">
-        <InputCheckbox id="doubleSided" class="form-check-input" @bind-Value="settings.DoubleSided" />
-        <label for="doubleSided" class="form-check-label">Impressão Frente e Verso?</label>
-    </div>
-
-    <div class="mb-3">
-        <label for="pagesPerSide" class="form-label">Páginas por Lado (2, 4, 6, 8, 9, 16):</label>
-        <InputNumber id="pagesPerSide" class="form-control" @bind-Value="settings.PagesPerSide" />
-    </div>
-
-    <div class="mb-3">
-        <label for="gapBetweenPages" class="form-label">Distância entre Páginas (em mm):</label>
-        <InputNumber id="gapBetweenPages" class="form-control" @bind-Value="gapMm" />
-    </div>
-
-    <button type="submit" class="btn btn-primary">Executar Imposição</button>
+    <button type="submit" class="btn btn-primary">Atualizar Visualização</button>
 </EditForm>
 
-@if (!string.IsNullOrEmpty(outputPdfUrl))
+@if (layoutCalculated)
 {
-    <div class="mt-3">
-        <a href="@outputPdfUrl" download="@settings.OutputPath">Baixar PDF Imputado</a>
-    </div>
+    <h4 class="mt-3">Layout de Imposição</h4>
+    <p>
+        Cada folha tem dimensões de: <strong>@outputWidth</strong> x <strong>@outputHeight</strong> pts.
+        Total de folhas: <strong>@totalSheets</strong>.
+    </p>
+    <canvas id="layoutCanvas" width="@canvasWidth" height="@canvasHeight" style="border:1px solid #ccc;"></canvas>
 }
 
 @code {
-    // Objeto de configuração (utilize a mesma classe ImpositionSettings já existente)
-    private ImpositionSettings settings = new ImpositionSettings()
+    // Tipo auxiliar para representar a ordem de uma face (front ou back) de uma folha
+    public class FaceOrder
+    {
+        public int Sheet { get; set; }
+        public string Face { get; set; } // "front" ou "back"
+        public int[] Order { get; set; }
+    }
+
+    // Configurações (utilizando a classe ImpoLib.ImpositionSettings)
+    private ImpositionSettings settings = new ImpositionSettings
         {
-            OutputPath = "imposto.pdf" // valor padrão para nome do arquivo de saída
+            PagesPerSide = 4,         // Para assinatura de 8 páginas, deve ser 4 (pois 4 páginas por face)
+            GapBetweenPages = 6,
+            ImpositionMethod = 1,     // Perfect-Bound
+            DoubleSided = true,
+            TotalPages = 8            // Caso especial para 8 páginas
         };
 
-    // Gap informado em mm (será convertido para pontos)
-    private decimal gapMm { get; set; } = 0;
+    // Dimensões originais da página (exemplo para A4 em pontos)
+    private float originalWidth = 595;
+    private float originalHeight = 842;
 
-    // Variável para armazenar o arquivo enviado pelo usuário (se houver)
-    private IBrowserFile uploadedFile;
+    // Dimensões calculadas para uma face de folha
+    private float outputWidth;
+    private float outputHeight;
+    private int cols;
+    private int rows;
+    private bool layoutCalculated = false;
 
-    // URL para download do PDF resultante (utilizando data URL)
-    private string outputPdfUrl;
+    // Para múltiplas folhas
+    private int pagesPerSheet;
+    private int adjustedPageCount;
+    private int totalSheets;
+    private List<FaceOrder> faces;
 
-    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    // Parâmetros para o canvas (fator de escala e margens)
+    private double canvasScale = 0.2;
+    private double canvasWidth => outputWidth * canvasScale + 40; // 20px de margem em cada lado
+    private double canvasHeight
     {
-        uploadedFile = e.File;
-        // Aqui você pode armazenar o conteúdo do arquivo em um MemoryStream
+        get
+        {
+            // Se duplex, cada folha tem 2 faces; senão, 1 face por folha
+            int totalFaces = settings.DoubleSided ? totalSheets * 2 : totalSheets;
+            return totalFaces * (outputHeight * canvasScale + sheetMargin * canvasScale) + 40;
+        }
+    }
+    private double sheetMargin = 20; // margem entre faces, em pontos
 
-
-        // Em uma implementação real, você poderá enviar esse stream para o seu método de imposição.
-        // Para este exemplo, definimos o InputPath como nulo para indicar que o PDF será gerado em memória.
-        settings.InputPath = null;
+    protected override void OnInitialized()
+    {
+        CalculateLayout();
     }
 
-    private async Task HandleValidSubmit()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        settings.GapBetweenPages = (float)((double)gapMm * 2.83465);
-
-        using (var ms = new MemoryStream())
+        if (layoutCalculated)
         {
-
-            if (uploadedFile != null)
-              await uploadedFile.OpenReadStream().CopyToAsync(ms);
-
-            using (var outputStream = new MemoryStream())
+            var parameters = new
             {
-
-                if (ms.Length > 0)
-                {
-                    ImpositionEngine.RunImposition(settings, ms, outputStream);
-                  
-                }
-                else
-                {
-                    ImpositionEngine.RunImposition(settings, null, outputStream);
-                }
-                // OBS: Na implementação real, adapte o método para aceitar streams de entrada/saída.
-
-                // Após o processamento, convertemos o MemoryStream para um data URL para download.
-                // Aqui, simulamos que outputStream contém o PDF processado.
-                byte[] pdfBytes = outputStream.ToArray();
-                string base64Pdf = Convert.ToBase64String(pdfBytes);
-                outputPdfUrl = $"data:application/pdf;base64,{base64Pdf}";
-            }
+                outputWidth,
+                outputHeight,
+                gapBetween = settings.GapBetweenPages,
+                cols,
+                rows,
+                sheetMargin,
+                totalSheets,
+                canvasScale,
+                faces = faces.Select(f => new { f.Sheet, Face = f.Face ?? "front", Order = f.Order.ToArray() }).ToArray()
+            };
+            await JS.InvokeVoidAsync("drawLayout", parameters);
         }
+    }
 
-        // Atualiza a interface
+    private void UpdatePreview()
+    {
+        CalculateLayout();
         StateHasChanged();
     }
+
+    private void CalculateLayout()
+    {
+        // Calcula as dimensões da face (grid) usando o LayoutCalculator da biblioteca
+        LayoutCalculator.CalculateOutputDimensions(settings.PagesPerSide, originalWidth, originalHeight,
+            settings.GapBetweenPages, out outputWidth, out outputHeight, out cols, out rows);
+        layoutCalculated = true;
+
+        // Calcula páginas por folha (se duplex, dobra)
+        pagesPerSheet = settings.DoubleSided ? settings.PagesPerSide * 2 : settings.PagesPerSide;
+        adjustedPageCount = settings.TotalPages;
+        if (settings.TotalPages % pagesPerSheet != 0)
+        {
+            adjustedPageCount = ((settings.TotalPages / pagesPerSheet) + 1) * pagesPerSheet;
+        }
+        totalSheets = adjustedPageCount / pagesPerSheet;
+
+        // Cria a lista de faces para desenhar
+        faces = new List<FaceOrder>();
+
+        // Se for o caso especial de 8 páginas com Perfect-Bound duplex
+        if (settings.TotalPages == 8 && settings.ImpositionMethod == 1 && settings.DoubleSided && settings.PagesPerSide == 4)
+        {
+            // Para este caso, o layout é fixo: grade 2x2
+            cols = 2; rows = 2; totalSheets = 1;
+            faces.Add(new FaceOrder { Sheet = 0, Face = "front", Order = new int[] { 8, 1, 2, 7 } });
+            faces.Add(new FaceOrder { Sheet = 0, Face = "back", Order = new int[] { 6, 3, 4, 5 } });
+        }
+        else
+        {
+            // Para outros casos:
+            if (settings.DoubleSided)
+            {
+                for (int sheet = 0; sheet < totalSheets; sheet++)
+                {
+                    int[] frontOrder, backOrder;
+                    if (settings.ImpositionMethod == 1)
+                    {
+                        frontOrder = LayoutCalculator.CalculatePerfectBoundPages(sheet, adjustedPageCount, settings.PagesPerSide, true, false);
+                        backOrder = LayoutCalculator.CalculatePerfectBoundPages(sheet, adjustedPageCount, settings.PagesPerSide, true, true);
+                    }
+                    else
+                    {
+                        frontOrder = Enumerable.Range(sheet * settings.PagesPerSide + 1, settings.PagesPerSide).ToArray();
+                        backOrder = Enumerable.Range(sheet * settings.PagesPerSide + settings.PagesPerSide + 1, settings.PagesPerSide).ToArray();
+                    }
+                    faces.Add(new FaceOrder { Sheet = sheet, Face = "front", Order = frontOrder });
+                    faces.Add(new FaceOrder { Sheet = sheet, Face = "back", Order = backOrder });
+                }
+            }
+            else
+            {
+                for (int sheet = 0; sheet < totalSheets; sheet++)
+                {
+                    int[] order;
+                    if (settings.ImpositionMethod == 1)
+                    {
+                        order = LayoutCalculator.CalculatePerfectBoundPages(sheet, adjustedPageCount, settings.PagesPerSide, false, false);
+                    }
+                    else
+                    {
+                        order = Enumerable.Range(sheet * settings.PagesPerSide + 1, settings.PagesPerSide).ToArray();
+                    }
+                    faces.Add(new FaceOrder { Sheet = sheet, Face = "front", Order = order });
+                }
+            }
+        }
+    }
 }
-6. Arquivo wwwroot/index.html
-html
-Copiar
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="utf-8" />
-    <title>Imposição de Páginas PDF</title>
-    <base href="/" />
-    <link href="css/bootstrap/bootstrap.min.css" rel="stylesheet" />
-    <link href="css/site.css" rel="stylesheet" />
-</head>
-<body>
-    <div id="app">Carregando...</div>
-    <script src="_framework/blazor.webassembly.js"></script>
-</body>
-</html>

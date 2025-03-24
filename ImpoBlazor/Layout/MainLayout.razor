@@ -1,9 +1,19 @@
 ﻿@inherits LayoutComponentBase
-<div class="container">
-    <header class="mb-4">
-        <h1>Imposição de Páginas PDF</h1>
-    </header>
-    <main>
+<MudThemeProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+<MudPopoverProvider />
+<MudLayout>
+    <MudAppBar Color="Color.Primary">
+        <MudText Typo="Typo.h6">ImpoBlazor</MudText>
+    </MudAppBar>
+
+    <MudDrawer Open="true" Variant="DrawerVariant.Mini">
+        <!-- Conteúdo do menu -->
+    </MudDrawer>
+
+    <MudMainContent>
         @Body
-    </main>
-</div>
+    </MudMainContent>
+</MudLayout>
+
